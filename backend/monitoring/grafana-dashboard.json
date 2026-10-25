@@ -1,0 +1,54 @@
+{
+  "title": "Sentinel OSINT Platform",
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active Scans",
+      "targets": [
+        { "expr": "dfas_active_scans" }
+      ],
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "API Request Density",
+      "targets": [
+        { "expr": "rate(dfas_http_requests_total[1m])" }
+      ],
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Scans Completed",
+      "targets": [
+        { "expr": "dfas_scans_total{status=\"completed\"}" }
+      ],
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 }
+    },
+    {
+      "type": "stat",
+      "title": "Scans Failed",
+      "targets": [
+        { "expr": "dfas_scans_total{status=\"failed\"}" }
+      ],
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 }
+    },
+    {
+      "type": "stat",
+      "title": "Tasks Completed",
+      "targets": [
+        { "expr": "dfas_tasks_total{status=\"completed\"}" }
+      ],
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 }
+    },
+    {
+      "type": "stat",
+      "title": "Tasks Timed Out",
+      "targets": [
+        { "expr": "dfas_tasks_total{status=\"timeout\"}" }
+      ],
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 }
+    }
+  ]
+}

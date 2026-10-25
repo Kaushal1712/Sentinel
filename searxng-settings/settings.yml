@@ -1,0 +1,48 @@
+# searxng-settings/settings.yml
+#
+# Minimal SearxNG configuration for the Sentinel Docker Compose stack.
+# Mounted as /etc/searxng/settings.yml inside the searxng/searxng:latest container.
+#
+# The searxng/searxng Docker image overrides bind_address and port via
+# environment variables so the container always listens on 0.0.0.0:8080
+# regardless of the values below.  Do not set port / bind_address here to
+# avoid conflicts with those environment overrides.
+#
+# Only the minimum required keys are set.  All other settings use the image
+# defaults (see https://github.com/searxng/searxng/blob/master/searx/settings.yml).
+#
+# IMPORTANT: Replace the placeholder secret_key before any public deployment.
+# Generate a value with:
+#   python3 -c "import secrets; print(secrets.token_hex(32))"
+
+use_default_settings: true
+
+general:
+  instance_name: "Sentinel SearxNG"
+  enable_metrics: false
+
+server:
+  # The secret key is required; the image will log a warning and use an
+  # insecure default if it is not set here.  Override via the
+  # SEARXNG_SECRET environment variable for production deployments.
+  secret_key: "change-this-searxng-secret-key"
+  # Limiter and public_instance are disabled for a private local stack.
+  limiter: false
+  public_instance: false
+  # Allow cross-origin requests from the Sentinel backend.
+  method: "GET"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  # json format is required by the Sentinel backend (SEARXNG_URL query parameter
+  # format=json).  html is kept for the web UI.
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 5.0
+  pool_connections: 50
+  enable_http2: true

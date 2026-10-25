@@ -1,0 +1,23 @@
+# Development / test dependencies — NOT installed in the production Docker image.
+# All runtime dependencies are in requirements.txt.
+#
+# To run the test suite inside the Docker container:
+#
+#   docker exec -it dfas-web pip install -r /app/backend/requirements-dev.txt
+#   docker exec -it dfas-web python -m pytest tests/ test_auth_security.py \
+#       test_admin.py test_export.py test_pipeline.py test_schedules.py \
+#       test_integration.py test_github.py -v
+#
+# To run only the standalone query-engine tests (no DB or services needed):
+#
+#   docker exec -it dfas-web python tests/test_query_engine_2c3.py
+#
+# NOTE: test_integration.py and test_pipeline.py require the full stack
+# (PostgreSQL + Redis). Run them only when all services are healthy:
+#
+#   docker exec -it dfas-web python -m pytest test_integration.py test_pipeline.py \
+#       --ignore=tests/test_query_engine_2c3.py -v
+#
+-r requirements.txt
+pytest>=8.0.0
+pytest-cov>=5.0.0

@@ -1,0 +1,229 @@
+# ── Environment variables ──────────────────────────────────────────────────────
+# Sensitive values are read from the shell environment (or a .env file that is
+# NOT committed to source control).  Copy .env.example to .env and set at
+# minimum:
+#   POSTGRES_PASSWORD   — PostgreSQL superuser password for the dfas database
+#   SECRET_KEY          — Flask session signing key (strong random value)
+#   JWT_SECRET_KEY      — JWT token signing key  (strong random value)
+#
+# Generate secrets:
+#   python scripts/generate-secrets.py
+#
+# ── Database migrations ─────────────────────────────────────────────────────────
+# Run migrations BEFORE starting dfas-web and dfas-worker for the first time,
+# and again after any code update that adds new migration files:
+#
+#   docker compose run --rm dfas-web flask db upgrade
+#
+# This applies all pending Alembic revisions (currently up to e5a1b2c3d4f6).
+# Starting the application against an unmigraded schema will cause errors.
+# ────────────────────────────────────────────────────────────────────────────────
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: dfas-postgres
+    environment:
+      POSTGRES_USER: dfas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: dfas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dfas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: dfas-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: dfas-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng-settings:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/'); print('ok')",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+
+  dfas-web:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: dfas-web
+    env_file:
+      - .env
+    environment:
+      TASK_QUEUE_ENABLED: "true"
+      DATABASE_URL: postgresql://dfas:${POSTGRES_PASSWORD}@db:5432/dfas
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      SCAN_QUEUE_NAME: scan-jobs
+      SEARXNG_URL: http://searxng:8080/search
+      SEARXNG_ENABLED: "true"
+      SEARXNG_TIME_RANGE: month
+      CORS_ORIGINS: http://localhost:5000,http://127.0.0.1:5000
+      # Rate limiter: shared Redis backend so all Gunicorn workers use one counter.
+      # Uses DB 1 to avoid collision with Celery's DB 0.
+      RATELIMIT_STORAGE_URI: "redis://redis:6379/1"
+      # Enforce Secure flag on JWT cookies in production.
+      JWT_COOKIE_SECURE: "true"
+      # Signal production mode so that validate_secrets() enforces strong secrets.
+      APP_ENV: "production"
+    ports:
+      - "5000:5000"
+    volumes:
+      - backend-data:/data
+      - backend-evidence:/app/backend/evidence
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health'); print('ok')",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  dfas-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: dfas-worker
+    command: celery -A celery_app:celery_app worker --loglevel=info -Q scan-jobs
+    env_file:
+      - .env
+    environment:
+      TASK_QUEUE_ENABLED: "true"
+      DATABASE_URL: postgresql://dfas:${POSTGRES_PASSWORD}@db:5432/dfas
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      SCAN_QUEUE_NAME: scan-jobs
+      SEARXNG_URL: http://searxng:8080/search
+      SEARXNG_ENABLED: "true"
+      SEARXNG_TIME_RANGE: month
+      RATELIMIT_STORAGE_URI: "redis://redis:6379/1"
+      APP_ENV: "production"
+    volumes:
+      - backend-data:/data
+      - backend-evidence:/app/backend/evidence
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    healthcheck:
+      # Pings the Celery worker over its control channel.
+      # A live-but-stuck worker (blocked event loop) will not respond and
+      # this command will time out, causing Docker to mark it unhealthy.
+      test:
+        [
+          "CMD",
+          "celery",
+          "-A", "celery_app:celery_app",
+          "inspect", "ping",
+          "--timeout", "5",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # restart: unless-stopped is critical — a worker crash or OOM-kill would
+    # otherwise leave all in-flight scans permanently in 'running' state.
+    restart: unless-stopped
+  dfas-beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: dfas-beat
+    command: celery -A celery_app:celery_app beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      TASK_QUEUE_ENABLED: "true"
+      DATABASE_URL: postgresql://dfas:${POSTGRES_PASSWORD}@db:5432/dfas
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RATELIMIT_STORAGE_URI: "redis://redis:6379/1"
+      APP_ENV: "production"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dfas-prometheus
+    volumes:
+      - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: dfas-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  redis-data:
+  backend-data:
+  backend-evidence:
+  prom-data:
+  grafana-data:
